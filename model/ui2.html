@@ -82,7 +82,7 @@
         // Se seu backend não estiver rodando, isso vai dar erro, 
         // mas a câmera DEVE aparecer mesmo assim.
         try {
-            ws = new WebSocket('wss://192.168.1.36:8080');
+            ws = new WebSocket('ws://192.168.1.36:8080');
             
             ws.onopen = () => { statusDiv.innerText = "Sistema Online"; statusDiv.style.color="green"; };
             
