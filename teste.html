@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Webcam WebSocket YOLO Node.js + GPS</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        video { display: none; }
+        canvas { border: 1px solid #ccc; max-width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #status, #gps { 
+            font-weight: bold; 
+            margin-bottom: 10px; 
+            padding: 10px; 
+            background: #f0f0f0; 
+            border-radius: 4px; 
+        }
+    </style>
+</head>
+<body>
+    <h2>YOLOv8 Webcam via Node.js WebSocket + GPS</h2>
+    <div id="status">Iniciando câmera...</div>
+    <div id="gps">GPS: aguardando...</div>
+    
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+<script>
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusDiv = document.getElementById('status');
+const gpsDiv = document.getElementById('gps');
+
+let ws;
+let isProcessing = false;
+let lastBoxes = [];
+
+// ---- GPS ----
+let currentPosition = {
+    lat: null,
+    lon: null,
+    accuracy: null,
+    timestamp: null
+};
+
+function startGPS() {
+    if (!navigator.geolocation) {
+        gpsDiv.innerText = "GPS não suportado neste navegador";
+        return;
+    }
+
+    navigator.geolocation.watchPosition(
+        pos => {
+            currentPosition.lat = pos.coords.latitude;
+            currentPosition.lon = pos.coords.longitude;
+            currentPosition.accuracy = pos.coords.accuracy;
+            currentPosition.timestamp = pos.timestamp;
+
+            gpsDiv.innerText = 
+                `GPS OK | Lat: ${currentPosition.lat.toFixed(6)} | ` +
+                `Lon: ${currentPosition.lon.toFixed(6)} | ` +
+                `±${Math.round(currentPosition.accuracy)}m`;
+        },
+        err => {
+            gpsDiv.innerText = "Erro GPS: " + err.message;
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 1000,
+            timeout: 10000
+        }
+    );
+}
+
+// ---- CÂMERA ----
+async function startCamera() {
+    try {
+        statusDiv.innerText = "Solicitando câmera...";
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480, facingMode: "environment" } 
+        });
+        
+        video.srcObject = stream;
+        
+        video.onloadedmetadata = () => {
+            video.play();
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            statusDiv.innerText = "Câmera OK. Conectando...";
+            connect();
+            renderLoop();
+            startGPS();   // <<< INICIA GPS AQUI
+        };
+    } catch (err) {
+        statusDiv.innerText = "ERRO: " + err.message;
+        alert("Permissão de câmera negada ou erro de HTTPS.");
+    }
+}
+
+// ---- RENDER ----
+function renderLoop() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        drawBoxes(lastBoxes);
+
+        if (ws && ws.readyState === WebSocket.OPEN && !isProcessing) {
+            sendFrame();
+        }
+    }
+    requestAnimationFrame(renderLoop);
+}
+
+// ---- WEBSOCKET ----
+function connect() {
+    try {
+        ws = new WebSocket('ws://localhost:8080');
+        
+        ws.onopen = () => { 
+            statusDiv.innerText = "Sistema Online"; 
+            statusDiv.style.color="green"; 
+        };
+        
+        ws.onmessage = (event) => {
+            const response = JSON.parse(event.data);
+            lastBoxes = response.objects || [];
+            isProcessing = false;
+        };
+
+        ws.onerror = () => { isProcessing = false; };
+        ws.onclose = () => { setTimeout(connect, 3000); };
+        
+    } catch(e) {
+        console.log("Servidor offline, mas mostrando câmera.");
+    }
+}
+
+// ---- ENVIO DO FRAME + GPS ----
+function sendFrame() {
+    isProcessing = true;
+
+    canvas.toBlob(blob => {
+        if (!blob) {
+            isProcessing = false;
+            return;
+        }
+
+        // Monta pacote com imagem + GPS
+        const metadata = {
+            gps: currentPosition,
+            ts: Date.now()
+        };
+
+        // Envia primeiro o JSON
+        ws.send(JSON.stringify({ type: "meta", data: metadata }));
+
+        // Depois envia a imagem binária
+        ws.send(blob);
+
+    }, 'image/jpeg', 0.6);
+}
+
+// ---- DESENHO DAS CAIXAS ----
+function drawBoxes(boxes) {
+    if(!boxes) return;
+    ctx.lineWidth = 3;
+    ctx.font = "18px Arial";
+    boxes.forEach(box => {
+        const [x1, y1, x2, y2, label, prob] = box;
+        ctx.strokeStyle = "#00FF00";
+        ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+        ctx.fillStyle = "#00FF00";
+        ctx.fillText(`${label}`, x1, y1 - 5);
+    });
+}
+
+// ---- START ----
+startCamera();
+</script>
+</body>
+</html>
