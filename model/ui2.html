@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Webcam WebSocket YOLO Node.js</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        /* Ocultamos o elemento de vídeo original, pois desenharemos no canvas */
+        video { display: none; }
+        canvas { border: 1px solid #ccc; max-width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #status { font-weight: bold; margin-bottom: 10px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h2>YOLOv8 Webcam via Node.js WebSocket</h2>
+    <div id="status">Iniciando câmera...</div>
+    
+    <!-- Elemento de vídeo oculto para capturar a stream -->
+    <video id="webcam" autoplay playsinline muted></video>
+    
+    <!-- Canvas onde desenhamos o vídeo + caixas -->
+    <canvas id="canvas"></canvas>
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    
+    let ws;
+    let isProcessing = false;
+    let lastBoxes = [];
+
+    async function startCamera() {
+        try {
+            statusDiv.innerText = "Solicitando câmera...";
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: 640, height: 480 } 
+            });
+            
+            video.srcObject = stream;
+            
+            // Aguarda o vídeo carregar os dados para dar play
+            video.onloadedmetadata = () => {
+                video.play();
+                
+                // Ajusta o tamanho do canvas para bater com a webcam
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                statusDiv.innerText = "Câmera OK. Conectando...";
+                
+                connect();
+                renderLoop();
+            };
+        } catch (err) {
+            statusDiv.innerText = "ERRO: " + err.message;
+            alert("Permissão de câmera negada ou erro de HTTPS.");
+        }
+    }
+
+    function renderLoop() {
+        // Verifica se o vídeo tem dados suficientes e largura > 0
+        if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+            
+            // 1. Desenha o frame do vídeo no canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // 2. Desenha as caixas (se houver)
+            drawBoxes(lastBoxes);
+
+            // 3. Envia para o backend (Lógica de Websocket)
+            if (ws && ws.readyState === WebSocket.OPEN && !isProcessing) {
+                sendFrame();
+                console.log("frame enviado");
+            }
+        }
+        
+        requestAnimationFrame(renderLoop);
+    }
+
+    function connect() {
+        // Se seu backend não estiver rodando, isso vai dar erro, 
+        // mas a câmera DEVE aparecer mesmo assim.
+        try {
+            ws = new WebSocket('ws://localhost:8080');
+            
+            ws.onopen = () => { statusDiv.innerText = "Sistema Online"; statusDiv.style.color="green"; };
+            
+            ws.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                lastBoxes = response.objects || [];
+                isProcessing = false;
+            };
+
+            ws.onerror = () => { isProcessing = false; };
+            ws.onclose = () => { setTimeout(connect, 3000); };
+            
+        } catch(e) {
+            console.log("Servidor offline, mas mostrando câmera.");
+        }
+    }
+
+    function sendFrame() {
+        isProcessing = true;
+        canvas.toBlob(blob => {
+            if(blob) ws.send(blob);
+            else isProcessing = false;
+        }, 'image/jpeg', 0.6);
+    }
+
+    function drawBoxes(boxes) {
+        if(!boxes) return;
+        ctx.lineWidth = 3;
+        ctx.font = "18px Arial";
+        boxes.forEach(box => {
+            const [x1, y1, x2, y2, label, prob] = box;
+            ctx.strokeStyle = "#00FF00";
+            ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+            ctx.fillStyle = "#00FF00";
+            ctx.fillText(`${label}`, x1, y1 - 5);
+        });
+    }
+
+    startCamera();
+
+    </script>
+</body>
+</html>
