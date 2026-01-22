@@ -34,7 +34,7 @@
         try {
             statusDiv.innerText = "Solicitando câmera...";
             const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { width: 640, height: 480 } 
+                video: { width: 640, height: 480, facingMode: "environment" } 
             });
             
             video.srcObject = stream;
