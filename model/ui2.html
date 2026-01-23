@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>Webcam WebSocket YOLO Node.js</title>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#000000">
     <style>
         body { font-family: sans-serif; padding: 20px; text-align: center; }
         /* Ocultamos o elemento de vídeo original, pois desenharemos no canvas */
@@ -126,14 +124,6 @@
     startCamera();
 
     </script>
-    <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('SW registrado', reg))
-        .catch(err => console.log('Erro ao registrar SW', err));
-    });
-  }
-</script>
+    
 </body>
 </html>
